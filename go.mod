@@ -1,4 +1,4 @@
-module github.com/mjkoot/GCiscoExporter
+module github.com/MJKhaani/GCiscoExporter
 
 go 1.26
 

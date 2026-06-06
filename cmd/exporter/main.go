@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mjkoot/GCiscoExporter/internal/cache"
-	"github.com/mjkoot/GCiscoExporter/internal/config"
-	"github.com/mjkoot/GCiscoExporter/internal/debugcapture"
-	"github.com/mjkoot/GCiscoExporter/internal/metrics"
-	"github.com/mjkoot/GCiscoExporter/internal/scheduler"
+	"github.com/MJKhaani/GCiscoExporter/internal/cache"
+	"github.com/MJKhaani/GCiscoExporter/internal/config"
+	"github.com/MJKhaani/GCiscoExporter/internal/debugcapture"
+	"github.com/MJKhaani/GCiscoExporter/internal/metrics"
+	"github.com/MJKhaani/GCiscoExporter/internal/scheduler"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mjkoot/GCiscoExporter/internal/config"
-	"github.com/mjkoot/GCiscoExporter/internal/provider/ssh"
+	"github.com/MJKhaani/GCiscoExporter/internal/config"
+	"github.com/MJKhaani/GCiscoExporter/internal/provider/ssh"
 )
 
 type DeviceCapabilities struct {

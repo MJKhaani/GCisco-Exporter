@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/mjkoot/GCiscoExporter/internal/config"
+	"github.com/MJKhaani/GCiscoExporter/internal/config"
 	"golang.org/x/crypto/ssh"
 )
 

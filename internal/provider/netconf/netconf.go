@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/mjkoot/GCiscoExporter/internal/config"
+	"github.com/MJKhaani/GCiscoExporter/internal/config"
 )
 
 type Provider struct {

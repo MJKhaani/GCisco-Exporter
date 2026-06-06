@@ -3,9 +3,9 @@ package optics
 import (
 	"context"
 
-	"github.com/mjkoot/GCiscoExporter/internal/config"
-	"github.com/mjkoot/GCiscoExporter/internal/metrics"
-	"github.com/mjkoot/GCiscoExporter/internal/provider/json"
+	"github.com/MJKhaani/GCiscoExporter/internal/config"
+	"github.com/MJKhaani/GCiscoExporter/internal/metrics"
+	"github.com/MJKhaani/GCiscoExporter/internal/provider/json"
 )
 
 type Collector struct {

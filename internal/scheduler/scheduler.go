@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mjkoot/GCiscoExporter/internal/cache"
-	"github.com/mjkoot/GCiscoExporter/internal/config"
-	"github.com/mjkoot/GCiscoExporter/internal/debugcapture"
-	"github.com/mjkoot/GCiscoExporter/internal/metrics"
-	"github.com/mjkoot/GCiscoExporter/internal/worker"
+	"github.com/MJKhaani/GCiscoExporter/internal/cache"
+	"github.com/MJKhaani/GCiscoExporter/internal/config"
+	"github.com/MJKhaani/GCiscoExporter/internal/debugcapture"
+	"github.com/MJKhaani/GCiscoExporter/internal/metrics"
+	"github.com/MJKhaani/GCiscoExporter/internal/worker"
 )
 
 type Scheduler struct {
