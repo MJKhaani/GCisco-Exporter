@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/MJKhaani/GCiscoExporter/internal/config"
 	"github.com/MJKhaani/GCiscoExporter/internal/debugcapture"
 	"github.com/MJKhaani/GCiscoExporter/internal/metrics"
+	"github.com/MJKhaani/GCiscoExporter/internal/provider/json"
+	"github.com/MJKhaani/GCiscoExporter/internal/provider/ssh"
 	"github.com/MJKhaani/GCiscoExporter/internal/worker"
 )
 
@@ -108,8 +111,30 @@ func (s *Scheduler) collectDevice(ctx context.Context, device *config.Device) er
 		return fmt.Errorf("credential %q not found for device %s", device.CredentialName, device.Name)
 	}
 
+	timeout := s.cfg.TimeoutDuration()
+
 	for _, method := range device.CollectionMethods {
-		result, provider, err := s.tryCollect(ctx, device, cred, method)
+		var providerName string
+		var result map[string]interface{}
+		var err error
+
+		switch method {
+		case "json":
+			providerName = "json"
+			result, err = s.collectJSON(ctx, device, cred, timeout)
+		case "ssh":
+			providerName = "ssh"
+			result, err = s.collectSSH(ctx, device, cred, timeout)
+		case "restconf":
+			providerName = "restconf"
+			err = fmt.Errorf("RESTCONF not yet implemented")
+		case "netconf":
+			providerName = "netconf"
+			err = fmt.Errorf("NETCONF not yet implemented")
+		default:
+			err = fmt.Errorf("unknown collection method: %s", method)
+		}
+
 		if err != nil {
 			log.Printf("Collection method %s failed for %s: %v", method, device.Name, err)
 			continue
@@ -117,7 +142,7 @@ func (s *Scheduler) collectDevice(ctx context.Context, device *config.Device) er
 
 		s.store.Update(device.Name, result)
 		s.collector.SetDeviceUp(device.Name, device.Host, device.Type, true)
-		s.collector.SetCollectionMethod(device.Name, device.Host, s.methodToFloat(provider))
+		s.collector.SetCollectionMethod(device.Name, device.Host, s.methodToFloat(providerName))
 		return nil
 	}
 
@@ -125,8 +150,100 @@ func (s *Scheduler) collectDevice(ctx context.Context, device *config.Device) er
 	return fmt.Errorf("all collection methods failed for %s", device.Name)
 }
 
-func (s *Scheduler) tryCollect(ctx context.Context, device *config.Device, cred *config.Credential, method string) (map[string]interface{}, string, error) {
-	return nil, "", fmt.Errorf("not implemented: %s", method)
+func (s *Scheduler) collectJSON(ctx context.Context, device *config.Device, cred *config.Credential, timeout time.Duration) (map[string]interface{}, error) {
+	client, err := ssh.NewClient(device, cred, timeout, s.cfg.LegacyCiphers)
+	if err != nil {
+		return nil, fmt.Errorf("SSH connect: %w", err)
+	}
+	defer client.Close()
+
+	provider := json.New(client, device)
+
+	result := make(map[string]interface{})
+
+	sys, err := provider.CollectSystem(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("collect system: %w", err)
+	}
+	s.collector.SetDeviceInfo(device.Name, device.Host, sys.Model, sys.Version, sys.Serial)
+	s.collector.SetDeviceUptime(device.Name, device.Host, sys.Uptime)
+	result["system"] = sys
+
+	ifaces, err := provider.CollectInterfaces(ctx)
+	if err != nil {
+		log.Printf("Warning: collect interfaces (JSON) failed for %s: %v", device.Name, err)
+	}
+	for _, iface := range ifaces {
+		s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
+		s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
+		s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
+		s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
+		s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
+		s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
+	}
+	result["interfaces"] = ifaces
+
+	res, err := provider.CollectResources(ctx)
+	if err != nil {
+		log.Printf("Warning: collect resources (JSON) failed for %s: %v", device.Name, err)
+	} else {
+		s.collector.SetCPUUsage(device.Name, device.Host, res.CPUUsage)
+		s.collector.SetMemoryTotal(device.Name, device.Host, res.MemTotal)
+		s.collector.SetMemoryUsed(device.Name, device.Host, res.MemUsed)
+		s.collector.SetMemoryFree(device.Name, device.Host, res.MemFree)
+	}
+	result["resources"] = res
+
+	procs, err := provider.CollectProcesses(ctx, device.ProcessLimit)
+	if err != nil {
+		log.Printf("Warning: collect processes (JSON) failed for %s: %v", device.Name, err)
+	} else {
+		for _, proc := range procs {
+			s.collector.SetProcessCPU(device.Name, device.Host, proc.Name, proc.CPU)
+			s.collector.SetProcessRuntime(device.Name, device.Host, proc.Name, proc.Runtime)
+		}
+	}
+	result["processes"] = procs
+
+	return result, nil
+}
+
+func (s *Scheduler) collectSSH(ctx context.Context, device *config.Device, cred *config.Credential, timeout time.Duration) (map[string]interface{}, error) {
+	client, err := ssh.NewClient(device, cred, timeout, s.cfg.LegacyCiphers)
+	if err != nil {
+		return nil, fmt.Errorf("SSH connect: %w", err)
+	}
+	defer client.Close()
+
+	commands := []string{
+		"show version",
+		"show interface",
+		"show processes cpu",
+		"show environment",
+		"show inventory",
+		"show trunk",
+	}
+
+	outputs, err := client.ExecuteAll(ctx, commands)
+	if err != nil {
+		return nil, fmt.Errorf("execute commands: %w", err)
+	}
+
+	result := make(map[string]interface{})
+	for cmd, output := range outputs {
+		key := strings.ReplaceAll(cmd, " ", "_")
+		result[key] = output
+	}
+
+	if s.cfg.DebugCapture.Enabled && s.debugCap != nil {
+		for cmd, output := range outputs {
+			if strings.TrimSpace(output) == "" {
+				s.debugCap.Save(device.Name, cmd, "EMPTY OUTPUT")
+			}
+		}
+	}
+
+	return result, nil
 }
 
 func (s *Scheduler) findCredential(name string) *config.Credential {

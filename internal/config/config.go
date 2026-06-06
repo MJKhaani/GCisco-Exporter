@@ -3,19 +3,22 @@ package config
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	ListenAddr        string         `yaml:"listen_addr"`
-	CollectionInterval string        `yaml:"collection_interval"`
-	Workers           int            `yaml:"workers"`
-	Timeout           string         `yaml:"timeout"`
-	CacheTTL          string         `yaml:"cache_ttl"`
-	Devices           []Device       `yaml:"devices"`
-	Credentials       []Credential   `yaml:"credentials"`
-	DebugCapture      DebugCapture   `yaml:"debug_capture"`
+	ListenAddr         string         `yaml:"listen_addr"`
+	CollectionInterval string         `yaml:"collection_interval"`
+	Workers            int            `yaml:"workers"`
+	Timeout            string         `yaml:"timeout"`
+	CacheTTL           string         `yaml:"cache_ttl"`
+	Devices            []Device       `yaml:"devices"`
+	Credentials        []Credential   `yaml:"credentials"`
+	DebugCapture       DebugCapture   `yaml:"debug_capture"`
+	Debug              bool           `yaml:"debug"`
+	LegacyCiphers      bool           `yaml:"legacy_ciphers"`
 }
 
 type Device struct {
@@ -53,6 +56,14 @@ func Load(path string) (*Config, error) {
 
 	setDefaults(&cfg)
 	return &cfg, nil
+}
+
+func (c *Config) TimeoutDuration() time.Duration {
+	d, err := time.ParseDuration(c.Timeout)
+	if err != nil {
+		return 30 * time.Second
+	}
+	return d
 }
 
 func setDefaults(cfg *Config) {
