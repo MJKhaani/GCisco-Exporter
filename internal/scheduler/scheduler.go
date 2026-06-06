@@ -12,6 +12,8 @@ import (
 	"github.com/MJKhaani/GCiscoExporter/internal/debugcapture"
 	"github.com/MJKhaani/GCiscoExporter/internal/metrics"
 	"github.com/MJKhaani/GCiscoExporter/internal/provider/json"
+	"github.com/MJKhaani/GCiscoExporter/internal/provider/netconf"
+	"github.com/MJKhaani/GCiscoExporter/internal/provider/restconf"
 	"github.com/MJKhaani/GCiscoExporter/internal/provider/ssh"
 	"github.com/MJKhaani/GCiscoExporter/internal/worker"
 )
@@ -126,10 +128,10 @@ func (s *Scheduler) collectDevice(ctx context.Context, device *config.Device) er
 			result, err = s.collectSSH(ctx, device, cred, timeout)
 		case "restconf":
 			providerName = "restconf"
-			err = fmt.Errorf("RESTCONF not yet implemented")
+			result, err = s.collectRESTCONF(ctx, device, cred, timeout)
 		case "netconf":
 			providerName = "netconf"
-			err = fmt.Errorf("NETCONF not yet implemented")
+			result, err = s.collectNETCONF(ctx, device, cred, timeout)
 		default:
 			err = fmt.Errorf("unknown collection method: %s", method)
 		}
@@ -239,6 +241,115 @@ func (s *Scheduler) collectSSH(ctx context.Context, device *config.Device, cred 
 		log.Printf("Warning: show environment failed for %s: %v", device.Name, err)
 	}
 	result["environment_raw"] = env
+
+	return result, nil
+}
+
+func (s *Scheduler) collectRESTCONF(ctx context.Context, device *config.Device, cred *config.Credential, timeout time.Duration) (map[string]interface{}, error) {
+	provider := restconf.New(device, cred)
+
+	result := make(map[string]interface{})
+
+	sys, err := provider.CollectSystem(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("collect system: %w", err)
+	}
+	s.collector.SetDeviceInfo(device.Name, device.Host, sys.Model, sys.Version, sys.Serial)
+	s.collector.SetDeviceUptime(device.Name, device.Host, sys.Uptime)
+	result["system"] = sys
+
+	ifaces, err := provider.CollectInterfaces(ctx)
+	if err != nil {
+		log.Printf("Warning: collect interfaces (RESTCONF) failed for %s: %v", device.Name, err)
+	}
+	for _, iface := range ifaces {
+		s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
+		s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
+		s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
+		s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
+		s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
+		s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
+	}
+	result["interfaces"] = ifaces
+
+	res, err := provider.CollectResources(ctx)
+	if err != nil {
+		log.Printf("Warning: collect resources (RESTCONF) failed for %s: %v", device.Name, err)
+	} else {
+		s.collector.SetCPUUsage(device.Name, device.Host, res.CPUUsage)
+		s.collector.SetMemoryTotal(device.Name, device.Host, res.MemTotal)
+		s.collector.SetMemoryUsed(device.Name, device.Host, res.MemUsed)
+		s.collector.SetMemoryFree(device.Name, device.Host, res.MemFree)
+	}
+	result["resources"] = res
+
+	procs, err := provider.CollectProcesses(ctx, device.ProcessLimit)
+	if err != nil {
+		log.Printf("Warning: collect processes (RESTCONF) failed for %s: %v", device.Name, err)
+	} else {
+		for _, proc := range procs {
+			s.collector.SetProcessCPU(device.Name, device.Host, proc.Name, proc.CPU)
+			s.collector.SetProcessRuntime(device.Name, device.Host, proc.Name, proc.Runtime)
+		}
+	}
+	result["processes"] = procs
+
+	return result, nil
+}
+
+func (s *Scheduler) collectNETCONF(ctx context.Context, device *config.Device, cred *config.Credential, timeout time.Duration) (map[string]interface{}, error) {
+	provider := netconf.New(device, cred)
+
+	if err := provider.Connect(ctx); err != nil {
+		return nil, fmt.Errorf("NETCONF connect: %w", err)
+	}
+	defer provider.Close()
+
+	result := make(map[string]interface{})
+
+	sys, err := provider.CollectSystem(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("collect system: %w", err)
+	}
+	s.collector.SetDeviceInfo(device.Name, device.Host, sys.Model, sys.Version, sys.Serial)
+	s.collector.SetDeviceUptime(device.Name, device.Host, sys.Uptime)
+	result["system"] = sys
+
+	ifaces, err := provider.CollectInterfaces(ctx)
+	if err != nil {
+		log.Printf("Warning: collect interfaces (NETCONF) failed for %s: %v", device.Name, err)
+	}
+	for _, iface := range ifaces {
+		s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
+		s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
+		s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
+		s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
+		s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
+		s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
+	}
+	result["interfaces"] = ifaces
+
+	res, err := provider.CollectResources(ctx)
+	if err != nil {
+		log.Printf("Warning: collect resources (NETCONF) failed for %s: %v", device.Name, err)
+	} else {
+		s.collector.SetCPUUsage(device.Name, device.Host, res.CPUUsage)
+		s.collector.SetMemoryTotal(device.Name, device.Host, res.MemTotal)
+		s.collector.SetMemoryUsed(device.Name, device.Host, res.MemUsed)
+		s.collector.SetMemoryFree(device.Name, device.Host, res.MemFree)
+	}
+	result["resources"] = res
+
+	procs, err := provider.CollectProcesses(ctx, device.ProcessLimit)
+	if err != nil {
+		log.Printf("Warning: collect processes (NETCONF) failed for %s: %v", device.Name, err)
+	} else {
+		for _, proc := range procs {
+			s.collector.SetProcessCPU(device.Name, device.Host, proc.Name, proc.CPU)
+			s.collector.SetProcessRuntime(device.Name, device.Host, proc.Name, proc.Runtime)
+		}
+	}
+	result["processes"] = procs
 
 	return result, nil
 }
