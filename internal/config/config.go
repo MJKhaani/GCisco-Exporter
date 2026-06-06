@@ -77,7 +77,7 @@ func setDefaults(cfg *Config) {
 		cfg.Workers = 50
 	}
 	if cfg.Timeout == "" {
-		cfg.Timeout = "30s"
+		cfg.Timeout = "60s"
 	}
 	if cfg.CacheTTL == "" {
 		cfg.CacheTTL = "120s"

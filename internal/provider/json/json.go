@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/MJKhaani/GCiscoExporter/internal/config"
 	"github.com/MJKhaani/GCiscoExporter/internal/provider/ssh"
@@ -56,8 +57,25 @@ func (p *Provider) Collect(ctx context.Context) (map[string]interface{}, error) 
 }
 
 func (p *Provider) parseJSON(raw string) map[string]interface{} {
+	start := strings.Index(raw, "{")
+	if start < 0 {
+		return map[string]interface{}{"raw": raw, "parse_error": "no JSON found"}
+	}
+	depth := 0
+	end := start
+	for i := start; i < len(raw); i++ {
+		if raw[i] == '{' {
+			depth++
+		} else if raw[i] == '}' {
+			depth--
+			if depth == 0 {
+				end = i + 1
+				break
+			}
+		}
+	}
 	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	if err := json.Unmarshal([]byte(raw[start:end]), &result); err != nil {
 		return map[string]interface{}{"raw": raw, "parse_error": err.Error()}
 	}
 	return result
@@ -70,11 +88,11 @@ func (p *Provider) CollectSystem(ctx context.Context) (SystemData, error) {
 	}
 	data := p.parseJSON(ver)
 	return SystemData{
-		Hostname:  p.stringField(data, "host_name"),
-		Version:   p.stringField(data, "nxos_ver_str"),
-		Model:     p.stringField(data, "chassis_id"),
-		Serial:    p.stringField(data, "proc_board_id"),
-		Uptime:    p.parseIntField(data, "uptime"),
+		Hostname: p.stringField(data, "host_name"),
+		Version:  p.stringField(data, "kickstart_ver_str"),
+		Model:    p.stringField(data, "chassis_id"),
+		Serial:   p.stringField(data, "proc_board_id"),
+		Uptime:   p.parseUptime(data),
 	}, nil
 }
 
@@ -124,7 +142,7 @@ func (p *Provider) CollectResources(ctx context.Context) (ResourceData, error) {
 	}
 	data := p.parseJSON(res)
 	return ResourceData{
-		CPUUsage: p.parseFloatField(data, "cpu_usage"),
+		CPUUsage: p.parseFloatField(data, "cpu_state_user") + p.parseFloatField(data, "cpu_state_kernel"),
 		MemTotal: p.parseIntField(data, "memory_usage_total"),
 		MemUsed:  p.parseIntField(data, "memory_usage_used"),
 		MemFree:  p.parseIntField(data, "memory_usage_free"),
@@ -179,6 +197,14 @@ func (p *Provider) parseIntField(data map[string]interface{}, key string) float6
 		}
 	}
 	return 0
+}
+
+func (p *Provider) parseUptime(data map[string]interface{}) float64 {
+	days := p.parseIntField(data, "kern_uptm_days")
+	hours := p.parseIntField(data, "kern_uptm_hrs")
+	mins := p.parseIntField(data, "kern_uptm_mins")
+	secs := p.parseIntField(data, "kern_uptm_secs")
+	return days*86400 + hours*3600 + mins*60 + secs
 }
 
 func (p *Provider) parseFloatField(data map[string]interface{}, key string) float64 {

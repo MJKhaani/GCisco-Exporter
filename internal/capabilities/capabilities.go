@@ -21,7 +21,7 @@ type DeviceCapabilities struct {
 
 func Detect(ctx context.Context, device *config.Device, cred *config.Credential) (*DeviceCapabilities, error) {
 	timeout := 10
-	client, err := ssh.NewClient(device, cred, time.Duration(timeout)*time.Second)
+	client, err := ssh.NewClient(device, cred, time.Duration(timeout)*time.Second, false)
 	if err != nil {
 		return nil, err
 	}

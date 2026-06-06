@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
 
@@ -215,33 +214,31 @@ func (s *Scheduler) collectSSH(ctx context.Context, device *config.Device, cred 
 	}
 	defer client.Close()
 
-	commands := []string{
-		"show version",
-		"show interface",
-		"show processes cpu",
-		"show environment",
-		"show inventory",
-		"show trunk",
-	}
-
-	outputs, err := client.ExecuteAll(ctx, commands)
-	if err != nil {
-		return nil, fmt.Errorf("execute commands: %w", err)
-	}
-
 	result := make(map[string]interface{})
-	for cmd, output := range outputs {
-		key := strings.ReplaceAll(cmd, " ", "_")
-		result[key] = output
-	}
 
-	if s.cfg.DebugCapture.Enabled && s.debugCap != nil {
-		for cmd, output := range outputs {
-			if strings.TrimSpace(output) == "" {
-				s.debugCap.Save(device.Name, cmd, "EMPTY OUTPUT")
-			}
-		}
+	ver, err := client.Execute(ctx, "show version")
+	if err != nil {
+		return nil, fmt.Errorf("show version: %w", err)
 	}
+	result["version_raw"] = ver
+
+	ifaces, err := client.Execute(ctx, "show interface")
+	if err != nil {
+		return nil, fmt.Errorf("show interface: %w", err)
+	}
+	result["interfaces_raw"] = ifaces
+
+	res, err := client.Execute(ctx, "show processes cpu")
+	if err != nil {
+		log.Printf("Warning: show processes cpu failed for %s: %v", device.Name, err)
+	}
+	result["processes_raw"] = res
+
+	env, err := client.Execute(ctx, "show environment")
+	if err != nil {
+		log.Printf("Warning: show environment failed for %s: %v", device.Name, err)
+	}
+	result["environment_raw"] = env
 
 	return result, nil
 }

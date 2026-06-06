@@ -1,6 +1,6 @@
 module github.com/MJKhaani/GCiscoExporter
 
-go 1.26
+go 1.22
 
 require (
 	github.com/prometheus/client_golang v1.20.0
