@@ -1,0 +1,40 @@
+listen_addr: ":9427"
+collection_interval: "60s"
+workers: 50
+timeout: "30s"
+cache_ttl: "120s"
+
+credentials:
+  - name: default
+    username: admin
+    password: changeme
+    # key_file: /path/to/ssh/key
+
+devices:
+  - name: nxos-core
+    host: 10.0.0.1
+    type: nxos
+    credential: default
+    collection_methods:
+      - json
+      - ssh
+
+  - name: iosxe-core
+    host: 10.0.0.2
+    type: iosxe
+    credential: default
+    collection_methods:
+      - restconf
+      - netconf
+      - ssh
+
+  - name: ios-core
+    host: 10.0.0.3
+    type: ios
+    credential: default
+    collection_methods:
+      - ssh
+
+debug_capture:
+  enabled: false
+  path: ./captures

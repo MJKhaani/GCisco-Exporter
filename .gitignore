@@ -1,0 +1,17 @@
+/bin/
+/dist/
+*.exe
+*.out
+*.test
+*.prof
+*.pprof
+captures/
+config.yaml
+!config.example.yaml
+vendor/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
