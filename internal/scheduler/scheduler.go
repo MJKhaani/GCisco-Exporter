@@ -159,52 +159,201 @@ func (s *Scheduler) collectJSON(ctx context.Context, device *config.Device, cred
 	defer client.Close()
 
 	provider := json.New(client, device)
-
+	ms := s.cfg.MetricSelection
 	result := make(map[string]interface{})
 
-	sys, err := provider.CollectSystem(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("collect system: %w", err)
-	}
-	s.collector.SetDeviceInfo(device.Name, device.Host, sys.Model, sys.Version, sys.Serial)
-	s.collector.SetDeviceUptime(device.Name, device.Host, sys.Uptime)
-	result["system"] = sys
-
-	ifaces, err := provider.CollectInterfaces(ctx)
-	if err != nil {
-		log.Printf("Warning: collect interfaces (JSON) failed for %s: %v", device.Name, err)
-	}
-	for _, iface := range ifaces {
-		s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
-		s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
-		s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
-		s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
-		s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
-		s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
-	}
-	result["interfaces"] = ifaces
-
-	res, err := provider.CollectResources(ctx)
-	if err != nil {
-		log.Printf("Warning: collect resources (JSON) failed for %s: %v", device.Name, err)
-	} else {
-		s.collector.SetCPUUsage(device.Name, device.Host, res.CPUUsage)
-		s.collector.SetMemoryTotal(device.Name, device.Host, res.MemTotal)
-		s.collector.SetMemoryUsed(device.Name, device.Host, res.MemUsed)
-		s.collector.SetMemoryFree(device.Name, device.Host, res.MemFree)
-	}
-	result["resources"] = res
-
-	procs, err := provider.CollectProcesses(ctx, device.ProcessLimit)
-	if err != nil {
-		log.Printf("Warning: collect processes (JSON) failed for %s: %v", device.Name, err)
-	} else {
-		for _, proc := range procs {
-			s.collector.SetProcessCPU(device.Name, device.Host, proc.Name, proc.CPU)
-			s.collector.SetProcessRuntime(device.Name, device.Host, proc.Name, proc.Runtime)
+	if ms.HardwareHealth {
+		sys, err := provider.CollectSystem(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("collect system: %w", err)
 		}
+		s.collector.SetDeviceInfo(device.Name, device.Host, sys.Model, sys.Version, sys.Serial)
+		s.collector.SetDeviceUptime(device.Name, device.Host, sys.Uptime)
+		result["system"] = sys
+
+		res, err := provider.CollectResources(ctx)
+		if err != nil {
+			log.Printf("Warning: collect resources (JSON) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetCPUUsage(device.Name, device.Host, res.CPUUsage)
+			s.collector.SetMemoryTotal(device.Name, device.Host, res.MemTotal)
+			s.collector.SetMemoryUsed(device.Name, device.Host, res.MemUsed)
+			s.collector.SetMemoryFree(device.Name, device.Host, res.MemFree)
+		}
+		result["resources"] = res
+
+		procs, err := provider.CollectProcesses(ctx, device.ProcessLimit)
+		if err != nil {
+			log.Printf("Warning: collect processes (JSON) failed for %s: %v", device.Name, err)
+		} else {
+			for _, proc := range procs {
+				s.collector.SetProcessCPU(device.Name, device.Host, proc.Name, proc.CPU)
+				s.collector.SetProcessRuntime(device.Name, device.Host, proc.Name, proc.Runtime)
+			}
+		}
+		result["processes"] = procs
+
+		hw, err := provider.CollectHardware(ctx)
+		if err != nil {
+			log.Printf("Warning: collect hardware (JSON) failed for %s: %v", device.Name, err)
+		} else {
+			for sensor, temp := range hw.Temperature {
+				s.collector.SetTemperature(device.Name, device.Host, sensor, temp)
+			}
+			for fan, ok := range hw.FanStatus {
+				s.collector.SetFanStatus(device.Name, device.Host, fan, ok)
+			}
+			for ps, ok := range hw.PowerSupply {
+				s.collector.SetPowerSupplyStatus(device.Name, device.Host, ps, ok)
+			}
+			s.collector.SetPowerRedundancyStatus(device.Name, device.Host, hw.PowerRedundant)
+			for mod, ok := range hw.ModuleStatus {
+				s.collector.SetModuleStatus(device.Name, device.Host, mod, ok)
+			}
+			for member, active := range hw.StackMemberStatus {
+				s.collector.SetStackMemberStatus(device.Name, device.Host, member, active)
+			}
+		}
+		result["hardware"] = hw
 	}
-	result["processes"] = procs
+
+	if ms.Interfaces {
+		ifaces, err := provider.CollectInterfaces(ctx)
+		if err != nil {
+			log.Printf("Warning: collect interfaces (JSON) failed for %s: %v", device.Name, err)
+		}
+		for _, iface := range ifaces {
+			s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
+			s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
+			s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
+			s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
+			s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
+			s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
+			s.collector.SetInterfaceRxCrcErrors(device.Name, device.Host, iface.Name, iface.RxCrcErrors)
+			s.collector.SetInterfaceRxFrameErrors(device.Name, device.Host, iface.Name, iface.RxFrame)
+			s.collector.SetInterfaceRxRunts(device.Name, device.Host, iface.Name, iface.RxRunts)
+			s.collector.SetInterfaceRxGiants(device.Name, device.Host, iface.Name, iface.RxGiants)
+			s.collector.SetInterfaceRxDrops(device.Name, device.Host, iface.Name, iface.RxDrops)
+			s.collector.SetInterfaceTxDrops(device.Name, device.Host, iface.Name, iface.TxDrops)
+			s.collector.SetInterfaceRxDiscards(device.Name, device.Host, iface.Name, iface.RxDiscards)
+			s.collector.SetInterfaceTxDiscards(device.Name, device.Host, iface.Name, iface.TxDiscards)
+			s.collector.SetInterfaceResets(device.Name, device.Host, iface.Name, iface.Resets)
+			s.collector.SetInterfaceSpeed(device.Name, device.Host, iface.Name, iface.Speed)
+			s.collector.SetInterfaceMtu(device.Name, device.Host, iface.Name, iface.Mtu)
+		}
+		result["interfaces"] = ifaces
+
+		optics, err := provider.CollectOptics(ctx)
+		if err != nil {
+			log.Printf("Warning: collect optics (JSON) failed for %s: %v", device.Name, err)
+		}
+		for iface, optic := range optics {
+			s.collector.SetOpticRxPower(device.Name, device.Host, iface, optic.RxPower)
+			s.collector.SetOpticTxPower(device.Name, device.Host, iface, optic.TxPower)
+			s.collector.SetOpticTemperature(device.Name, device.Host, iface, optic.Temp)
+			s.collector.SetOpticVoltage(device.Name, device.Host, iface, optic.Voltage)
+			s.collector.SetOpticBiasCurrent(device.Name, device.Host, iface, optic.BiasCurrent)
+		}
+		result["optics"] = optics
+	}
+
+	if ms.Layer2Stability {
+		stp, err := provider.CollectSTP(ctx)
+		if err != nil {
+			log.Printf("Warning: collect STP (JSON) failed for %s: %v", device.Name, err)
+		} else {
+			for vlan, count := range stp.RootChanges {
+				s.collector.SetSTPRootChanges(device.Name, device.Host, vlan, count)
+			}
+			for vlan, count := range stp.TopoChanges {
+				s.collector.SetSTPTopologyChanges(device.Name, device.Host, vlan, count)
+			}
+			for vlan, count := range stp.BlockedPorts {
+				s.collector.SetSTPBlockedPorts(device.Name, device.Host, vlan, count)
+			}
+		}
+		result["stp"] = stp
+
+		mac, err := provider.CollectMAC(ctx)
+		if err != nil {
+			log.Printf("Warning: collect MAC (JSON) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetMACTableCount(device.Name, device.Host, mac.TableCount)
+			s.collector.SetMACTableUtilization(device.Name, device.Host, mac.TableUtilization)
+			for vlan, count := range mac.Moves {
+				s.collector.SetMACMoves(device.Name, device.Host, vlan, count)
+			}
+		}
+		result["mac"] = mac
+
+		vlans, err := provider.CollectVLANs(ctx)
+		if err != nil {
+			log.Printf("Warning: collect VLANs (JSON) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetVLANCount(device.Name, device.Host, float64(vlans.Count))
+			s.collector.SetVLANActiveCount(device.Name, device.Host, float64(vlans.Active))
+		}
+		result["vlans"] = vlans
+	}
+
+	if ms.EtherChannel {
+		pcs, err := provider.CollectPortChannels(ctx)
+		if err != nil {
+			log.Printf("Warning: collect port-channels (JSON) failed for %s: %v", device.Name, err)
+		} else {
+			for pc, up := range pcs.Status {
+				s.collector.SetPortChannelStatus(device.Name, device.Host, pc, up)
+			}
+			for pc, members := range pcs.MemberStatus {
+				for member, active := range members {
+					s.collector.SetPortChannelMemberStatus(device.Name, device.Host, pc, member, active)
+				}
+			}
+			for pc, count := range pcs.SuspendedMembers {
+				s.collector.SetPortChannelSuspendedMembers(device.Name, device.Host, pc, count)
+			}
+		}
+		result["portchannels"] = pcs
+	}
+
+	if ms.Layer3Tables {
+		l3, err := provider.CollectL3Tables(ctx)
+		if err != nil {
+			log.Printf("Warning: collect L3 tables (JSON) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetARPTableCount(device.Name, device.Host, l3.ARPCount)
+			s.collector.SetARPTableUtilization(device.Name, device.Host, l3.ARPUtilization)
+			s.collector.SetRoutingTableUtilization(device.Name, device.Host, l3.RoutingUtilization)
+			s.collector.SetFIBUtilization(device.Name, device.Host, l3.FIBUtilization)
+			s.collector.SetAdjacencyTableUtilization(device.Name, device.Host, l3.AdjacencyUtilization)
+		}
+		result["l3tables"] = l3
+	}
+
+	if ms.SystemMaintenance {
+		sysInfo, err := provider.CollectSystemInfo(ctx)
+		if err != nil {
+			log.Printf("Warning: collect system info (JSON) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetNTPSynced(device.Name, device.Host, sysInfo.NTPSynced)
+			s.collector.SetFlashUtilization(device.Name, device.Host, sysInfo.FlashUtil)
+		}
+		result["sysinfo"] = sysInfo
+	}
+
+	if ms.CapacityTrends {
+		cap, err := provider.CollectCapacity(ctx)
+		if err != nil {
+			log.Printf("Warning: collect capacity (JSON) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetPortUtilizationRatio(device.Name, device.Host, cap.PortUtilizationRatio)
+			s.collector.SetTransceiverCount(device.Name, device.Host, float64(cap.TransceiverCount))
+			for pool, util := range cap.BufferUtilization {
+				s.collector.SetBufferUtilization(device.Name, device.Host, pool, util)
+			}
+		}
+		result["capacity"] = cap
+	}
 
 	return result, nil
 }
@@ -216,83 +365,180 @@ func (s *Scheduler) collectSSH(ctx context.Context, device *config.Device, cred 
 	}
 	defer client.Close()
 
+	ms := s.cfg.MetricSelection
 	result := make(map[string]interface{})
 
-	ver, err := client.Execute(ctx, "show version")
-	if err != nil {
-		return nil, fmt.Errorf("show version: %w", err)
-	}
-	result["version_raw"] = ver
+	if ms.HardwareHealth {
+		ver, err := client.Execute(ctx, "show version")
+		if err != nil {
+			return nil, fmt.Errorf("show version: %w", err)
+		}
+		result["version_raw"] = ver
 
-	ifaces, err := client.Execute(ctx, "show interface")
-	if err != nil {
-		return nil, fmt.Errorf("show interface: %w", err)
-	}
-	result["interfaces_raw"] = ifaces
+		res, err := client.Execute(ctx, "show processes cpu")
+		if err != nil {
+			log.Printf("Warning: show processes cpu failed for %s: %v", device.Name, err)
+		}
+		result["processes_raw"] = res
 
-	res, err := client.Execute(ctx, "show processes cpu")
-	if err != nil {
-		log.Printf("Warning: show processes cpu failed for %s: %v", device.Name, err)
+		env, err := client.Execute(ctx, "show environment")
+		if err != nil {
+			log.Printf("Warning: show environment failed for %s: %v", device.Name, err)
+		}
+		result["environment_raw"] = env
 	}
-	result["processes_raw"] = res
 
-	env, err := client.Execute(ctx, "show environment")
-	if err != nil {
-		log.Printf("Warning: show environment failed for %s: %v", device.Name, err)
+	if ms.Interfaces {
+		ifaces, err := client.Execute(ctx, "show interface")
+		if err != nil {
+			return nil, fmt.Errorf("show interface: %w", err)
+		}
+		result["interfaces_raw"] = ifaces
+
+		trans, err := client.Execute(ctx, "show interface transceiver details")
+		if err != nil {
+			log.Printf("Warning: show transceiver failed for %s: %v", device.Name, err)
+		}
+		result["transceiver_raw"] = trans
 	}
-	result["environment_raw"] = env
+
+	if ms.Layer2Stability {
+		stpSum, err := client.Execute(ctx, "show spanning-tree summary")
+		if err != nil {
+			log.Printf("Warning: show spanning-tree summary failed for %s: %v", device.Name, err)
+		}
+		result["stp_summary_raw"] = stpSum
+
+		stpDetail, err := client.Execute(ctx, "show spanning-tree detail")
+		if err != nil {
+			log.Printf("Warning: show spanning-tree detail failed for %s: %v", device.Name, err)
+		}
+		result["stp_detail_raw"] = stpDetail
+
+		macCount, err := client.Execute(ctx, "show mac address-table count")
+		if err != nil {
+			log.Printf("Warning: show mac count failed for %s: %v", device.Name, err)
+		}
+		result["mac_count_raw"] = macCount
+
+		vlanBrief, err := client.Execute(ctx, "show vlan brief")
+		if err != nil {
+			log.Printf("Warning: show vlan brief failed for %s: %v", device.Name, err)
+		}
+		result["vlan_brief_raw"] = vlanBrief
+	}
+
+	if ms.EtherChannel {
+		ecSum, err := client.Execute(ctx, "show etherchannel summary")
+		if err != nil {
+			log.Printf("Warning: show etherchannel summary failed for %s: %v", device.Name, err)
+		}
+		result["etherchannel_summary_raw"] = ecSum
+	}
+
+	if ms.Layer3Tables {
+		arpSum, err := client.Execute(ctx, "show ip arp summary")
+		if err != nil {
+			log.Printf("Warning: show arp summary failed for %s: %v", device.Name, err)
+		}
+		result["arp_summary_raw"] = arpSum
+
+		routeSum, err := client.Execute(ctx, "show ip route summary")
+		if err != nil {
+			log.Printf("Warning: show route summary failed for %s: %v", device.Name, err)
+		}
+		result["route_summary_raw"] = routeSum
+
+		cefSum, err := client.Execute(ctx, "show ip cef summary")
+		if err != nil {
+			log.Printf("Warning: show cef summary failed for %s: %v", device.Name, err)
+		}
+		result["cef_summary_raw"] = cefSum
+
+		adjSum, err := client.Execute(ctx, "show adjacency summary")
+		if err != nil {
+			log.Printf("Warning: show adjacency summary failed for %s: %v", device.Name, err)
+		}
+		result["adjacency_summary_raw"] = adjSum
+	}
+
+	if ms.SystemMaintenance {
+		ntpStatus, err := client.Execute(ctx, "show ntp status")
+		if err != nil {
+			log.Printf("Warning: show ntp status failed for %s: %v", device.Name, err)
+		}
+		result["ntp_status_raw"] = ntpStatus
+
+		fs, err := client.Execute(ctx, "show file systems")
+		if err != nil {
+			log.Printf("Warning: show file systems failed for %s: %v", device.Name, err)
+		}
+		result["filesystems_raw"] = fs
+	}
+
+	if ms.CapacityTrends {
+		buf, err := client.Execute(ctx, "show buffers")
+		if err != nil {
+			log.Printf("Warning: show buffers failed for %s: %v", device.Name, err)
+		}
+		result["buffers_raw"] = buf
+	}
 
 	return result, nil
 }
 
 func (s *Scheduler) collectRESTCONF(ctx context.Context, device *config.Device, cred *config.Credential, timeout time.Duration) (map[string]interface{}, error) {
 	provider := restconf.New(device, cred)
-
+	ms := s.cfg.MetricSelection
 	result := make(map[string]interface{})
 
-	sys, err := provider.CollectSystem(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("collect system: %w", err)
-	}
-	s.collector.SetDeviceInfo(device.Name, device.Host, sys.Model, sys.Version, sys.Serial)
-	s.collector.SetDeviceUptime(device.Name, device.Host, sys.Uptime)
-	result["system"] = sys
-
-	ifaces, err := provider.CollectInterfaces(ctx)
-	if err != nil {
-		log.Printf("Warning: collect interfaces (RESTCONF) failed for %s: %v", device.Name, err)
-	}
-	for _, iface := range ifaces {
-		s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
-		s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
-		s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
-		s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
-		s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
-		s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
-	}
-	result["interfaces"] = ifaces
-
-	res, err := provider.CollectResources(ctx)
-	if err != nil {
-		log.Printf("Warning: collect resources (RESTCONF) failed for %s: %v", device.Name, err)
-	} else {
-		s.collector.SetCPUUsage(device.Name, device.Host, res.CPUUsage)
-		s.collector.SetMemoryTotal(device.Name, device.Host, res.MemTotal)
-		s.collector.SetMemoryUsed(device.Name, device.Host, res.MemUsed)
-		s.collector.SetMemoryFree(device.Name, device.Host, res.MemFree)
-	}
-	result["resources"] = res
-
-	procs, err := provider.CollectProcesses(ctx, device.ProcessLimit)
-	if err != nil {
-		log.Printf("Warning: collect processes (RESTCONF) failed for %s: %v", device.Name, err)
-	} else {
-		for _, proc := range procs {
-			s.collector.SetProcessCPU(device.Name, device.Host, proc.Name, proc.CPU)
-			s.collector.SetProcessRuntime(device.Name, device.Host, proc.Name, proc.Runtime)
+	if ms.HardwareHealth {
+		sys, err := provider.CollectSystem(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("collect system: %w", err)
 		}
+		s.collector.SetDeviceInfo(device.Name, device.Host, sys.Model, sys.Version, sys.Serial)
+		s.collector.SetDeviceUptime(device.Name, device.Host, sys.Uptime)
+		result["system"] = sys
+
+		res, err := provider.CollectResources(ctx)
+		if err != nil {
+			log.Printf("Warning: collect resources (RESTCONF) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetCPUUsage(device.Name, device.Host, res.CPUUsage)
+			s.collector.SetMemoryTotal(device.Name, device.Host, res.MemTotal)
+			s.collector.SetMemoryUsed(device.Name, device.Host, res.MemUsed)
+			s.collector.SetMemoryFree(device.Name, device.Host, res.MemFree)
+		}
+		result["resources"] = res
+
+		procs, err := provider.CollectProcesses(ctx, device.ProcessLimit)
+		if err != nil {
+			log.Printf("Warning: collect processes (RESTCONF) failed for %s: %v", device.Name, err)
+		} else {
+			for _, proc := range procs {
+				s.collector.SetProcessCPU(device.Name, device.Host, proc.Name, proc.CPU)
+				s.collector.SetProcessRuntime(device.Name, device.Host, proc.Name, proc.Runtime)
+			}
+		}
+		result["processes"] = procs
 	}
-	result["processes"] = procs
+
+	if ms.Interfaces {
+		ifaces, err := provider.CollectInterfaces(ctx)
+		if err != nil {
+			log.Printf("Warning: collect interfaces (RESTCONF) failed for %s: %v", device.Name, err)
+		}
+		for _, iface := range ifaces {
+			s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
+			s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
+			s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
+			s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
+			s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
+			s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
+		}
+		result["interfaces"] = ifaces
+	}
 
 	return result, nil
 }
@@ -305,51 +551,56 @@ func (s *Scheduler) collectNETCONF(ctx context.Context, device *config.Device, c
 	}
 	defer provider.Close()
 
+	ms := s.cfg.MetricSelection
 	result := make(map[string]interface{})
 
-	sys, err := provider.CollectSystem(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("collect system: %w", err)
-	}
-	s.collector.SetDeviceInfo(device.Name, device.Host, sys.Model, sys.Version, sys.Serial)
-	s.collector.SetDeviceUptime(device.Name, device.Host, sys.Uptime)
-	result["system"] = sys
-
-	ifaces, err := provider.CollectInterfaces(ctx)
-	if err != nil {
-		log.Printf("Warning: collect interfaces (NETCONF) failed for %s: %v", device.Name, err)
-	}
-	for _, iface := range ifaces {
-		s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
-		s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
-		s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
-		s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
-		s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
-		s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
-	}
-	result["interfaces"] = ifaces
-
-	res, err := provider.CollectResources(ctx)
-	if err != nil {
-		log.Printf("Warning: collect resources (NETCONF) failed for %s: %v", device.Name, err)
-	} else {
-		s.collector.SetCPUUsage(device.Name, device.Host, res.CPUUsage)
-		s.collector.SetMemoryTotal(device.Name, device.Host, res.MemTotal)
-		s.collector.SetMemoryUsed(device.Name, device.Host, res.MemUsed)
-		s.collector.SetMemoryFree(device.Name, device.Host, res.MemFree)
-	}
-	result["resources"] = res
-
-	procs, err := provider.CollectProcesses(ctx, device.ProcessLimit)
-	if err != nil {
-		log.Printf("Warning: collect processes (NETCONF) failed for %s: %v", device.Name, err)
-	} else {
-		for _, proc := range procs {
-			s.collector.SetProcessCPU(device.Name, device.Host, proc.Name, proc.CPU)
-			s.collector.SetProcessRuntime(device.Name, device.Host, proc.Name, proc.Runtime)
+	if ms.HardwareHealth {
+		sys, err := provider.CollectSystem(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("collect system: %w", err)
 		}
+		s.collector.SetDeviceInfo(device.Name, device.Host, sys.Model, sys.Version, sys.Serial)
+		s.collector.SetDeviceUptime(device.Name, device.Host, sys.Uptime)
+		result["system"] = sys
+
+		res, err := provider.CollectResources(ctx)
+		if err != nil {
+			log.Printf("Warning: collect resources (NETCONF) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetCPUUsage(device.Name, device.Host, res.CPUUsage)
+			s.collector.SetMemoryTotal(device.Name, device.Host, res.MemTotal)
+			s.collector.SetMemoryUsed(device.Name, device.Host, res.MemUsed)
+			s.collector.SetMemoryFree(device.Name, device.Host, res.MemFree)
+		}
+		result["resources"] = res
+
+		procs, err := provider.CollectProcesses(ctx, device.ProcessLimit)
+		if err != nil {
+			log.Printf("Warning: collect processes (NETCONF) failed for %s: %v", device.Name, err)
+		} else {
+			for _, proc := range procs {
+				s.collector.SetProcessCPU(device.Name, device.Host, proc.Name, proc.CPU)
+				s.collector.SetProcessRuntime(device.Name, device.Host, proc.Name, proc.Runtime)
+			}
+		}
+		result["processes"] = procs
 	}
-	result["processes"] = procs
+
+	if ms.Interfaces {
+		ifaces, err := provider.CollectInterfaces(ctx)
+		if err != nil {
+			log.Printf("Warning: collect interfaces (NETCONF) failed for %s: %v", device.Name, err)
+		}
+		for _, iface := range ifaces {
+			s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
+			s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
+			s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
+			s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
+			s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
+			s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
+		}
+		result["interfaces"] = ifaces
+	}
 
 	return result, nil
 }

@@ -1,0 +1,58 @@
+# Cisco Exporter - Metric Selection Configuration
+# =================================================
+# All metric categories are enabled by default.
+# Set any category to false to disable its collection.
+#
+# Excluded metric types (event/syslog/crash nature, not suitable for Prometheus):
+#   - Syslog messages / crash events
+#   - UDLD events / Loop Guard events
+#   - Routing protocol neighbor states (OSPF, EIGRP, BGP, ISIS)
+#   - First-hop redundancy (HSRP, VRRP, GLBP)
+#   - vPC (NX-OS specific)
+#   - Security/control plane events (CoPP drops, DHCP snooping, DAI, port-security, ACL drops)
+
+metric_selection:
+  # 1) Hardware Health
+  #    CPU utilization, memory utilization/free, temperature sensors,
+  #    fan status, power supply status, power redundancy status,
+  #    supervisor status, line card/module status, stack member status
+  hardware_health: true
+
+  # 2) Interfaces
+  #    Admin/oper status, flaps, availability, utilization (ingress/egress),
+  #    input/output errors, CRC errors, frame errors, runts, giants,
+  #    input/output drops, input/output discards, queue drops,
+  #    interface resets, MTU mismatches,
+  #    optical TX/RX power, optical temperature, optical voltage, optical bias current
+  interfaces: true
+
+  # 3) Layer 2 Stability
+  #    STP root changes, topology changes, port state changes, blocked ports,
+  #    MAC table utilization, MAC move events, VLAN utilization/status,
+  #    BPDU Guard events
+  #    (excludes: UDLD events, Loop Guard events)
+  layer2_stability: true
+
+  # 4) EtherChannel / Port-Channel
+  #    Port-channel status, LACP status, LACP member status,
+  #    suspended members, port-channel utilization, port-channel errors
+  etherchannel: true
+
+  # 5) Layer 3 Tables
+  #    ARP table utilization/entry count,
+  #    routing table/FIB/CEF utilization,
+  #    adjacency table utilization
+  layer3_tables: true
+
+  # 6) System / Maintenance
+  #    NTP synchronization status, configuration change events,
+  #    device uptime, reload events, license status, flash/storage utilization
+  #    (excludes: syslog messages, crash events)
+  system_maintenance: true
+
+  # 7) Capacity / Trend Metrics
+  #    CPU/memory trends, interface utilization trends,
+  #    MAC/ARP/routing table utilization trends,
+  #    VLAN count, port utilization ratio,
+  #    transceiver inventory utilization, buffer/queue utilization
+  capacity_trends: true

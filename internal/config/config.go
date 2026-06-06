@@ -19,6 +19,17 @@ type Config struct {
 	DebugCapture       DebugCapture   `yaml:"debug_capture"`
 	Debug              bool           `yaml:"debug"`
 	LegacyCiphers      bool           `yaml:"legacy_ciphers"`
+	MetricSelection    MetricSelection `yaml:"metric_selection"`
+}
+
+type MetricSelection struct {
+	HardwareHealth   bool `yaml:"hardware_health"`
+	Interfaces       bool `yaml:"interfaces"`
+	Layer2Stability  bool `yaml:"layer2_stability"`
+	EtherChannel     bool `yaml:"etherchannel"`
+	Layer3Tables     bool `yaml:"layer3_tables"`
+	SystemMaintenance bool `yaml:"system_maintenance"`
+	CapacityTrends   bool `yaml:"capacity_trends"`
 }
 
 type Device struct {
@@ -98,5 +109,14 @@ func setDefaults(cfg *Config) {
 		if cfg.Devices[i].ProcessLimit == 0 {
 			cfg.Devices[i].ProcessLimit = 10
 		}
+	}
+	if !cfg.MetricSelection.HardwareHealth && !cfg.MetricSelection.Interfaces && !cfg.MetricSelection.Layer2Stability && !cfg.MetricSelection.EtherChannel && !cfg.MetricSelection.Layer3Tables && !cfg.MetricSelection.SystemMaintenance && !cfg.MetricSelection.CapacityTrends {
+		cfg.MetricSelection.HardwareHealth = true
+		cfg.MetricSelection.Interfaces = true
+		cfg.MetricSelection.Layer2Stability = true
+		cfg.MetricSelection.EtherChannel = true
+		cfg.MetricSelection.Layer3Tables = true
+		cfg.MetricSelection.SystemMaintenance = true
+		cfg.MetricSelection.CapacityTrends = true
 	}
 }
