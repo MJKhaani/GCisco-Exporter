@@ -276,21 +276,35 @@ func (p *Provider) CollectProcesses(ctx context.Context, limit int) ([]ProcessDa
 
 func parseXMLFields(data string) map[string]interface{} {
 	result := make(map[string]interface{})
-	re := regexp.MustCompile(`<([^/>]+)>([^<]*)</\1>`)
-	matches := re.FindAllStringSubmatch(data, -1)
-	for _, m := range matches {
-		if len(m) == 3 {
-			key := strings.TrimSpace(m[1])
-			val := strings.TrimSpace(m[2])
-			if idx := strings.Index(key, " "); idx >= 0 {
-				key = key[:idx]
-			}
-			if f, err := strconv.ParseFloat(val, 64); err == nil {
-				result[key] = f
-			} else {
-				result[key] = val
-			}
+	// Simple XML tag extraction without backreferences
+	reOpen := regexp.MustCompile(`<([^\s/>]+)[^>]*>`)
+	reClose := regexp.MustCompile(`</([^\s>]+)>`)
+	
+	opens := reOpen.FindAllStringSubmatch(data, -1)
+	closes := reClose.FindAllStringSubmatch(data, -1)
+	
+	for i, open := range opens {
+		if i >= len(closes) {
+			break
 		}
+		tag := open[1]
+		closeTag := closes[i][1]
+		if tag != closeTag {
+			continue
+		}
+		// Find content between open and close
+		start := strings.Index(data, ">") + 1
+		end := strings.Index(data, "</"+closeTag+">")
+		if end < 0 || end <= start {
+			continue
+		}
+		val := strings.TrimSpace(data[start:end])
+		if f, err := strconv.ParseFloat(val, 64); err == nil {
+			result[tag] = f
+		} else {
+			result[tag] = val
+		}
+		data = data[end+len("</"+closeTag+">"):]
 	}
 	return result
 }

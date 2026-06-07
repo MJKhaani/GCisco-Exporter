@@ -38,7 +38,7 @@ func New(device *config.Device, cred *config.Credential) *Provider {
 		cred:    cred,
 		baseURL: fmt.Sprintf("https://%s:%d/restconf/data", device.Host, port),
 		client: &http.Client{
-			Timeout:   30 * time.Second,
+			Timeout:   60 * time.Second,
 			Transport: &http.Transport{TLSClientConfig: transport},
 		},
 		username: cred.Username,

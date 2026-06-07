@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -367,124 +368,388 @@ func (s *Scheduler) collectSSH(ctx context.Context, device *config.Device, cred 
 
 	ms := s.cfg.MetricSelection
 	result := make(map[string]interface{})
+	devType := strings.ToLower(device.Type)
 
-	if ms.HardwareHealth {
-		ver, err := client.Execute(ctx, "show version")
-		if err != nil {
-			return nil, fmt.Errorf("show version: %w", err)
-		}
-		result["version_raw"] = ver
-
-		res, err := client.Execute(ctx, "show processes cpu")
-		if err != nil {
-			log.Printf("Warning: show processes cpu failed for %s: %v", device.Name, err)
-		}
-		result["processes_raw"] = res
-
-		env, err := client.Execute(ctx, "show environment")
-		if err != nil {
-			log.Printf("Warning: show environment failed for %s: %v", device.Name, err)
-		}
-		result["environment_raw"] = env
-	}
-
-	if ms.Interfaces {
-		ifaces, err := client.Execute(ctx, "show interface")
-		if err != nil {
-			return nil, fmt.Errorf("show interface: %w", err)
-		}
-		result["interfaces_raw"] = ifaces
-
-		trans, err := client.Execute(ctx, "show interface transceiver details")
-		if err != nil {
-			log.Printf("Warning: show transceiver failed for %s: %v", device.Name, err)
-		}
-		result["transceiver_raw"] = trans
-	}
-
-	if ms.Layer2Stability {
-		stpSum, err := client.Execute(ctx, "show spanning-tree summary")
-		if err != nil {
-			log.Printf("Warning: show spanning-tree summary failed for %s: %v", device.Name, err)
-		}
-		result["stp_summary_raw"] = stpSum
-
-		stpDetail, err := client.Execute(ctx, "show spanning-tree detail")
-		if err != nil {
-			log.Printf("Warning: show spanning-tree detail failed for %s: %v", device.Name, err)
-		}
-		result["stp_detail_raw"] = stpDetail
-
-		macCount, err := client.Execute(ctx, "show mac address-table count")
-		if err != nil {
-			log.Printf("Warning: show mac count failed for %s: %v", device.Name, err)
-		}
-		result["mac_count_raw"] = macCount
-
-		vlanBrief, err := client.Execute(ctx, "show vlan brief")
-		if err != nil {
-			log.Printf("Warning: show vlan brief failed for %s: %v", device.Name, err)
-		}
-		result["vlan_brief_raw"] = vlanBrief
-	}
-
-	if ms.EtherChannel {
-		ecSum, err := client.Execute(ctx, "show etherchannel summary")
-		if err != nil {
-			log.Printf("Warning: show etherchannel summary failed for %s: %v", device.Name, err)
-		}
-		result["etherchannel_summary_raw"] = ecSum
-	}
-
-	if ms.Layer3Tables {
-		arpSum, err := client.Execute(ctx, "show ip arp summary")
-		if err != nil {
-			log.Printf("Warning: show arp summary failed for %s: %v", device.Name, err)
-		}
-		result["arp_summary_raw"] = arpSum
-
-		routeSum, err := client.Execute(ctx, "show ip route summary")
-		if err != nil {
-			log.Printf("Warning: show route summary failed for %s: %v", device.Name, err)
-		}
-		result["route_summary_raw"] = routeSum
-
-		cefSum, err := client.Execute(ctx, "show ip cef summary")
-		if err != nil {
-			log.Printf("Warning: show cef summary failed for %s: %v", device.Name, err)
-		}
-		result["cef_summary_raw"] = cefSum
-
-		adjSum, err := client.Execute(ctx, "show adjacency summary")
-		if err != nil {
-			log.Printf("Warning: show adjacency summary failed for %s: %v", device.Name, err)
-		}
-		result["adjacency_summary_raw"] = adjSum
-	}
-
-	if ms.SystemMaintenance {
-		ntpStatus, err := client.Execute(ctx, "show ntp status")
-		if err != nil {
-			log.Printf("Warning: show ntp status failed for %s: %v", device.Name, err)
-		}
-		result["ntp_status_raw"] = ntpStatus
-
-		fs, err := client.Execute(ctx, "show file systems")
-		if err != nil {
-			log.Printf("Warning: show file systems failed for %s: %v", device.Name, err)
-		}
-		result["filesystems_raw"] = fs
-	}
-
-	if ms.CapacityTrends {
-		buf, err := client.Execute(ctx, "show buffers")
-		if err != nil {
-			log.Printf("Warning: show buffers failed for %s: %v", device.Name, err)
-		}
-		result["buffers_raw"] = buf
+	switch devType {
+	case "nxos":
+		s.collectSSHNXOS(ctx, client, device, ms, result)
+	case "iosxe":
+		s.collectSSHIOSXE(ctx, client, device, ms, result)
+	case "ios":
+		s.collectSSHIOS(ctx, client, device, ms, result)
+	default:
+		s.collectSSHIOS(ctx, client, device, ms, result)
 	}
 
 	return result, nil
+}
+
+func (s *Scheduler) collectSSHNXOS(ctx context.Context, client *ssh.Client, device *config.Device, ms config.MetricSelection, result map[string]interface{}) {
+	if ms.HardwareHealth {
+		ver, _ := client.Execute(ctx, "show version")
+		verData := ssh.ParseNXOSVersion(ver)
+		inv, _ := client.Execute(ctx, "show inventory")
+		invData := ssh.ParseNXOSInventory(inv)
+		if invData.Chassis != "" {
+			verData.Model = invData.Chassis
+		}
+		if invData.Serial != "" {
+			verData.Serial = invData.Serial
+		}
+		s.collector.SetDeviceInfo(device.Name, device.Host, verData.Model, verData.Version, verData.Serial)
+		s.collector.SetDeviceUptime(device.Name, device.Host, verData.Uptime)
+		result["system"] = verData
+
+		cpuOut, err := client.Execute(ctx, "show processes cpu")
+		if err != nil {
+			log.Printf("Warning: show processes cpu (NX-OS) failed for %s: %v", device.Name, err)
+		} else {
+			cpuData := ssh.ParseNXOSCPU(cpuOut)
+			s.collector.SetCPUUsage(device.Name, device.Host, cpuData.FiveSec)
+			result["cpu"] = cpuData
+		}
+
+		envOut, err := client.Execute(ctx, "show environment")
+		if err != nil {
+			log.Printf("Warning: show environment (NX-OS) failed for %s: %v", device.Name, err)
+		} else {
+			envData := ssh.ParseNXOSEnvironment(envOut)
+			for fan, ok := range envData.FanStatus {
+				s.collector.SetFanStatus(device.Name, device.Host, fan, ok)
+			}
+			for ps, ok := range envData.PowerSupply {
+				s.collector.SetPowerSupplyStatus(device.Name, device.Host, ps, ok)
+			}
+			s.collector.SetPowerRedundancyStatus(device.Name, device.Host, envData.PowerRedund)
+			for sensor, temp := range envData.Temperature {
+				s.collector.SetTemperature(device.Name, device.Host, sensor, temp)
+			}
+		}
+		result["environment"] = envOut
+	}
+
+	if ms.Interfaces {
+		ifaceOut, err := client.Execute(ctx, "show interface")
+		if err != nil {
+			log.Printf("Warning: show interface (NX-OS) failed for %s: %v", device.Name, err)
+		} else {
+			ifaces := ssh.ParseNXOSInterfaces(ifaceOut)
+			for _, iface := range ifaces {
+				s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
+				s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
+				s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
+				s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
+				s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
+				s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
+				s.collector.SetInterfaceRxCrcErrors(device.Name, device.Host, iface.Name, iface.RxCrc)
+				s.collector.SetInterfaceRxRunts(device.Name, device.Host, iface.Name, iface.RxRunts)
+				s.collector.SetInterfaceRxGiants(device.Name, device.Host, iface.Name, iface.RxGiants)
+				s.collector.SetInterfaceRxDrops(device.Name, device.Host, iface.Name, iface.RxDrops)
+				s.collector.SetInterfaceTxDrops(device.Name, device.Host, iface.Name, iface.TxDrops)
+				s.collector.SetInterfaceRxDiscards(device.Name, device.Host, iface.Name, iface.RxDiscards)
+				s.collector.SetInterfaceTxDiscards(device.Name, device.Host, iface.Name, iface.TxDiscards)
+				s.collector.SetInterfaceResets(device.Name, device.Host, iface.Name, iface.Resets)
+				s.collector.SetInterfaceSpeed(device.Name, device.Host, iface.Name, iface.Speed)
+				s.collector.SetInterfaceMtu(device.Name, device.Host, iface.Name, iface.Mtu)
+			}
+			result["interfaces"] = ifaces
+		}
+	}
+
+	if ms.Layer2Stability {
+		stpOut, err := client.Execute(ctx, "show spanning-tree summary")
+		if err != nil {
+			log.Printf("Warning: show spanning-tree summary (NX-OS) failed for %s: %v", device.Name, err)
+		} else {
+			stp := ssh.ParseNXOSSTP(stpOut)
+			for vlan, count := range stp.BlockedPorts {
+				s.collector.SetSTPBlockedPorts(device.Name, device.Host, vlan, count)
+			}
+		}
+
+		vlanOut, err := client.Execute(ctx, "show vlan brief")
+		if err != nil {
+			log.Printf("Warning: show vlan brief (NX-OS) failed for %s: %v", device.Name, err)
+		} else {
+			vlanData := ssh.ParseNXOSVLANs(vlanOut)
+			s.collector.SetVLANCount(device.Name, device.Host, float64(vlanData.VLANCount))
+			s.collector.SetVLANActiveCount(device.Name, device.Host, float64(vlanData.ActiveVLAN))
+			result["vlans"] = vlanData
+		}
+	}
+
+	if ms.Layer3Tables {
+		arpOut, err := client.Execute(ctx, "show ip arp")
+		if err != nil {
+			log.Printf("Warning: show ip arp (NX-OS) failed for %s: %v", device.Name, err)
+		} else {
+			arpData := ssh.ParseNXOSARP(arpOut)
+			s.collector.SetARPTableCount(device.Name, device.Host, arpData.ARPCount)
+		}
+
+		routeOut, err := client.Execute(ctx, "show ip route summary")
+		if err != nil {
+			log.Printf("Warning: show ip route summary (NX-OS) failed for %s: %v", device.Name, err)
+		} else {
+			routeData := ssh.ParseNXOSRouteSummary(routeOut)
+			s.collector.SetRoutingTableUtilization(device.Name, device.Host, routeData.RouteCount)
+		}
+	}
+
+	if ms.SystemMaintenance {
+		ntpOut, err := client.Execute(ctx, "show ntp status")
+		if err != nil {
+			log.Printf("Warning: show ntp status (NX-OS) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetNTPSynced(device.Name, device.Host, ssh.ParseNXOSNTP(ntpOut))
+		}
+
+		flashOut, _ := client.Execute(ctx, "show version")
+		s.collector.SetFlashUtilization(device.Name, device.Host, ssh.ParseNXOSFlash(flashOut))
+	}
+}
+
+func (s *Scheduler) collectSSHIOSXE(ctx context.Context, client *ssh.Client, device *config.Device, ms config.MetricSelection, result map[string]interface{}) {
+	if ms.HardwareHealth {
+		ver, _ := client.Execute(ctx, "show version")
+		verData := ssh.ParseIOSXEVersion(ver)
+		inv, _ := client.Execute(ctx, "show inventory")
+		invData := ssh.ParseIOSXEInventory(inv)
+		if invData.Model != "" {
+			verData.Model = invData.Model
+		}
+		if invData.Serial != "" {
+			verData.Serial = invData.Serial
+		}
+		s.collector.SetDeviceInfo(device.Name, device.Host, verData.Model, verData.Version, verData.Serial)
+		s.collector.SetDeviceUptime(device.Name, device.Host, verData.Uptime)
+		result["system"] = verData
+
+		cpuOut, err := client.Execute(ctx, "show processes cpu")
+		if err != nil {
+			log.Printf("Warning: show processes cpu (IOS-XE) failed for %s: %v", device.Name, err)
+		} else {
+			cpuData := ssh.ParseIOSXECPU(cpuOut)
+			s.collector.SetCPUUsage(device.Name, device.Host, cpuData.FiveSec)
+			result["cpu"] = cpuData
+		}
+
+		envOut, err := client.Execute(ctx, "show environment all")
+		if err != nil {
+			log.Printf("Warning: show environment all (IOS-XE) failed for %s: %v", device.Name, err)
+		} else {
+			envData := ssh.ParseIOSXEEnvironment(envOut)
+			for fan, ok := range envData.FanStatus {
+				s.collector.SetFanStatus(device.Name, device.Host, fan, ok)
+			}
+			for ps, ok := range envData.PowerSupply {
+				s.collector.SetPowerSupplyStatus(device.Name, device.Host, ps, ok)
+			}
+			for sensor, temp := range envData.Temperature {
+				s.collector.SetTemperature(device.Name, device.Host, sensor, temp)
+			}
+		}
+		result["environment"] = envOut
+	}
+
+	if ms.Interfaces {
+		ifaceOut, err := client.Execute(ctx, "show interface")
+		if err != nil {
+			log.Printf("Warning: show interface (IOS-XE) failed for %s: %v", device.Name, err)
+		} else {
+			ifaces := ssh.ParseIOSXEInterfaces(ifaceOut)
+			for _, iface := range ifaces {
+				s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
+				s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
+				s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
+				s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
+				s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
+				s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
+				s.collector.SetInterfaceRxCrcErrors(device.Name, device.Host, iface.Name, iface.RxCrc)
+				s.collector.SetInterfaceRxRunts(device.Name, device.Host, iface.Name, iface.RxRunts)
+				s.collector.SetInterfaceRxGiants(device.Name, device.Host, iface.Name, iface.RxGiants)
+				s.collector.SetInterfaceRxDrops(device.Name, device.Host, iface.Name, iface.RxDrops)
+				s.collector.SetInterfaceTxDrops(device.Name, device.Host, iface.Name, iface.TxDrops)
+				s.collector.SetInterfaceRxDiscards(device.Name, device.Host, iface.Name, iface.RxDiscards)
+				s.collector.SetInterfaceTxDiscards(device.Name, device.Host, iface.Name, iface.TxDiscards)
+				s.collector.SetInterfaceResets(device.Name, device.Host, iface.Name, iface.Resets)
+				s.collector.SetInterfaceSpeed(device.Name, device.Host, iface.Name, iface.Speed)
+				s.collector.SetInterfaceMtu(device.Name, device.Host, iface.Name, iface.Mtu)
+			}
+			result["interfaces"] = ifaces
+		}
+	}
+
+	if ms.Layer2Stability {
+		stpOut, err := client.Execute(ctx, "show spanning-tree summary")
+		if err != nil {
+			log.Printf("Warning: show spanning-tree summary (IOS-XE) failed for %s: %v", device.Name, err)
+		} else {
+			stp := ssh.ParseIOSXESTP(stpOut)
+			for vlan, count := range stp.BlockedPorts {
+				s.collector.SetSTPBlockedPorts(device.Name, device.Host, vlan, count)
+			}
+		}
+
+		vlanOut, err := client.Execute(ctx, "show vlan brief")
+		if err != nil {
+			log.Printf("Warning: show vlan brief (IOS-XE) failed for %s: %v", device.Name, err)
+		} else {
+			vlanData := ssh.ParseIOSXEVLANs(vlanOut)
+			s.collector.SetVLANCount(device.Name, device.Host, float64(vlanData.VLANCount))
+			s.collector.SetVLANActiveCount(device.Name, device.Host, float64(vlanData.ActiveVLAN))
+			result["vlans"] = vlanData
+		}
+
+		macOut, _ := client.Execute(ctx, "show mac address-table count")
+		s.collector.SetMACTableCount(device.Name, device.Host, ssh.ParseIOSXEMACCount(macOut))
+	}
+
+	if ms.Layer3Tables {
+		arpOut, err := client.Execute(ctx, "show ip arp summary")
+		if err != nil {
+			log.Printf("Warning: show ip arp summary (IOS-XE) failed for %s: %v", device.Name, err)
+		} else {
+			arpData := ssh.ParseIOSXEARP(arpOut)
+			s.collector.SetARPTableCount(device.Name, device.Host, arpData.ARPCount)
+		}
+
+		routeOut, err := client.Execute(ctx, "show ip route summary")
+		if err != nil {
+			log.Printf("Warning: show ip route summary (IOS-XE) failed for %s: %v", device.Name, err)
+		} else {
+			routeData := ssh.ParseIOSXERouteSummary(routeOut)
+			s.collector.SetRoutingTableUtilization(device.Name, device.Host, routeData.RouteCount)
+		}
+	}
+
+	if ms.SystemMaintenance {
+		ntpOut, err := client.Execute(ctx, "show ntp status")
+		if err != nil {
+			log.Printf("Warning: show ntp status (IOS-XE) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetNTPSynced(device.Name, device.Host, ssh.ParseIOSXENTP(ntpOut))
+		}
+
+		fsOut, err := client.Execute(ctx, "show file systems")
+		if err != nil {
+			log.Printf("Warning: show file systems (IOS-XE) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetFlashUtilization(device.Name, device.Host, ssh.ParseIOSXEFlash(fsOut))
+		}
+	}
+}
+
+func (s *Scheduler) collectSSHIOS(ctx context.Context, client *ssh.Client, device *config.Device, ms config.MetricSelection, result map[string]interface{}) {
+	if ms.HardwareHealth {
+		ver, err := client.Execute(ctx, "show version")
+		if err != nil {
+			return
+		}
+		verData := ssh.ParseVersion(ver)
+		s.collector.SetDeviceInfo(device.Name, device.Host, verData.Model, verData.Version, verData.Serial)
+		s.collector.SetDeviceUptime(device.Name, device.Host, verData.Uptime)
+		result["system"] = verData
+
+		cpuOut, err := client.Execute(ctx, "show processes cpu")
+		if err != nil {
+			log.Printf("Warning: show processes cpu (IOS) failed for %s: %v", device.Name, err)
+		} else {
+			cpuData := ssh.ParseCPU(cpuOut)
+			s.collector.SetCPUUsage(device.Name, device.Host, cpuData.FiveSec)
+			result["cpu"] = cpuData
+		}
+
+		envOut, err := client.Execute(ctx, "show environment")
+		if err != nil {
+			log.Printf("Warning: show environment (IOS) failed for %s: %v", device.Name, err)
+		}
+		result["environment_raw"] = envOut
+	}
+
+	if ms.Interfaces {
+		ifaceOut, err := client.Execute(ctx, "show interface")
+		if err != nil {
+			return
+		}
+		ifaces := ssh.ParseInterfaces(ifaceOut)
+		for _, iface := range ifaces {
+			s.collector.SetInterfaceAdminUp(device.Name, device.Host, iface.Name, iface.AdminUp)
+			s.collector.SetInterfaceOperUp(device.Name, device.Host, iface.Name, iface.OperUp)
+			s.collector.SetInterfaceRxBytes(device.Name, device.Host, iface.Name, iface.RxBytes)
+			s.collector.SetInterfaceTxBytes(device.Name, device.Host, iface.Name, iface.TxBytes)
+			s.collector.SetInterfaceRxErrors(device.Name, device.Host, iface.Name, iface.RxErrors)
+			s.collector.SetInterfaceTxErrors(device.Name, device.Host, iface.Name, iface.TxErrors)
+			s.collector.SetInterfaceRxCrcErrors(device.Name, device.Host, iface.Name, iface.RxCrc)
+			s.collector.SetInterfaceRxRunts(device.Name, device.Host, iface.Name, iface.RxRunts)
+			s.collector.SetInterfaceRxGiants(device.Name, device.Host, iface.Name, iface.RxGiants)
+			s.collector.SetInterfaceRxDrops(device.Name, device.Host, iface.Name, iface.RxDrops)
+			s.collector.SetInterfaceTxDrops(device.Name, device.Host, iface.Name, iface.TxDrops)
+			s.collector.SetInterfaceRxDiscards(device.Name, device.Host, iface.Name, iface.RxDiscards)
+			s.collector.SetInterfaceTxDiscards(device.Name, device.Host, iface.Name, iface.TxDiscards)
+			s.collector.SetInterfaceResets(device.Name, device.Host, iface.Name, iface.Resets)
+			s.collector.SetInterfaceSpeed(device.Name, device.Host, iface.Name, iface.Speed)
+			s.collector.SetInterfaceMtu(device.Name, device.Host, iface.Name, iface.Mtu)
+		}
+		result["interfaces"] = ifaces
+	}
+
+	if ms.Layer2Stability {
+		stpOut, err := client.Execute(ctx, "show spanning-tree summary")
+		if err != nil {
+			log.Printf("Warning: show spanning-tree summary (IOS) failed for %s: %v", device.Name, err)
+		} else {
+			stp := ssh.ParseSTP(stpOut)
+			for vlan, count := range stp.BlockedPorts {
+				s.collector.SetSTPBlockedPorts(device.Name, device.Host, vlan, count)
+			}
+		}
+
+		vlanOut, err := client.Execute(ctx, "show vlan brief")
+		if err != nil {
+			log.Printf("Warning: show vlan brief (IOS) failed for %s: %v", device.Name, err)
+		} else {
+			vlanData := ssh.ParseVLANs(vlanOut)
+			s.collector.SetVLANCount(device.Name, device.Host, float64(vlanData.VLANCount))
+			s.collector.SetVLANActiveCount(device.Name, device.Host, float64(vlanData.ActiveVLAN))
+			result["vlans"] = vlanData
+		}
+
+		macOut, _ := client.Execute(ctx, "show mac address-table count")
+		s.collector.SetMACTableCount(device.Name, device.Host, ssh.ParseMACCount(macOut))
+	}
+
+	if ms.Layer3Tables {
+		arpOut, err := client.Execute(ctx, "show ip arp summary")
+		if err != nil {
+			log.Printf("Warning: show ip arp summary (IOS) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetARPTableCount(device.Name, device.Host, ssh.ParseARPTable(arpOut))
+		}
+
+		routeOut, err := client.Execute(ctx, "show ip route summary")
+		if err != nil {
+			log.Printf("Warning: show ip route summary (IOS) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetRoutingTableUtilization(device.Name, device.Host, ssh.ParseRoutingTable(routeOut))
+		}
+	}
+
+	if ms.SystemMaintenance {
+		ntpOut, err := client.Execute(ctx, "show ntp status")
+		if err != nil {
+			log.Printf("Warning: show ntp status (IOS) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetNTPSynced(device.Name, device.Host, ssh.ParseNTPStatus(ntpOut))
+		}
+
+		fsOut, err := client.Execute(ctx, "show file systems")
+		if err != nil {
+			log.Printf("Warning: show file systems (IOS) failed for %s: %v", device.Name, err)
+		} else {
+			s.collector.SetFlashUtilization(device.Name, device.Host, ssh.ParseFlashUtilization(fsOut))
+		}
+	}
 }
 
 func (s *Scheduler) collectRESTCONF(ctx context.Context, device *config.Device, cred *config.Credential, timeout time.Duration) (map[string]interface{}, error) {
